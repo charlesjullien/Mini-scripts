@@ -1,0 +1,7 @@
+to print the searched text in current + all subdirectories :
+
+find . -type f -exec cat {} + | grep Your_Text
+
+to print the file names containing searched text in indicated directory :
+
+find . -type f -exec cat {} + | grep -l Your_Text Directory_containing_files
