@@ -1,0 +1,26 @@
+create a temporary bash alias to type some commands faster : 
+
+touch alias.txt
+vim alias.txt
+
+on first line write for ex:
+alias aa='./a.out'
+
+then esc :wq to save and quit vim
+
+open bash
+run the following cmd :
+
+. ./alias.txt
+
+now when you type for ex : 
+
+aa "whatever argv[1]" "whatever argv[2]"
+
+then press enter key;
+
+it will behave as if you did 
+
+./a.out "whatever argv[1]" "whatever argv[2]"
+
+then press enter key;
