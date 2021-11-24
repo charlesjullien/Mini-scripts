@@ -24,3 +24,7 @@ it will behave as if you did
 ./a.out "whatever argv[1]" "whatever argv[2]"
 
 then press enter key;
+
+-----------------------
+
+source : https://unix.stackexchange.com/questions/148921/creating-multiple-temporary-aliases
