@@ -1,0 +1,4 @@
+for i in {1..10}; do [insert command here]; done
+
+#the command will get executed 10 times here ==> "for i in {1..10}"
+source : https://serverfault.com/questions/273238/how-to-run-a-command-multiple-times-using-bash-shell
