@@ -3,3 +3,9 @@ sed -i '' 's/searched chars/replace by/' file.txt
 for linux, use : 
 
 sed -i 's/old-text/new-text/g' input.txt
+
+inside vim, in command mode, use :
+
+:%s/foo/bar/g
+
+(It will find each occurrence of 'foo' (in all lines), and replace it with 'bar').
