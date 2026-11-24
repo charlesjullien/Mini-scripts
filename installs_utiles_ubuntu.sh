@@ -12,6 +12,7 @@ umask 022
 # Le script refuse de s'exécuter en root.
 # Aucun autoremove automatique.
 # Murmure est facultatif et nécessite une confirmation.
+# Upscayl est facultatif : AppImage officielle, après confirmation.
 # Zoom et Cursor ne sont pas installés automatiquement.
 
 log() {
@@ -107,7 +108,8 @@ sudo env DEBIAN_FRONTEND=noninteractive \
     gnome-shell-extension-gpaste \
     gnome-boxes \
     easyeffects \
-    pavucontrol
+    pavucontrol \
+    imagemagick
 
 # ClamTk est facultatif : ne pas faire échouer toute
 # l'installation si le paquet n'existe pas dans les dépôts.
@@ -349,7 +351,137 @@ PY
     fi
 fi
 
-# 9. Zoom et Cursor
+# 9. Upscayl : AppImage officielle
+#
+# Le fichier publié est versionné (upscayl-<version>-linux.AppImage).
+# Il est installé sous le nom fixe ~/Applications/Upscayl/Upscayl-linux.AppImage.
+
+UPSCAYL_INSTALLED=0
+
+if [[ "$ARCH" != "amd64" ]]; then
+    warn "L'AppImage Upscayl publiée vise x86_64."
+    warn "Elle ne sera pas téléchargée sur cette architecture."
+elif confirm "Souhaites-tu télécharger Upscayl (AppImage officielle) ?"; then
+    UPSCAYL_DIR="${HOME}/Applications/Upscayl"
+    UPSCAYL_DEST="${UPSCAYL_DIR}/Upscayl-linux.AppImage"
+
+    if [[ -f "$UPSCAYL_DEST" ]] &&
+        ! confirm "Upscayl est déjà présent. Le télécharger et le remplacer ?"; then
+        log "Téléchargement d'Upscayl annulé. L'AppImage existante est conservée."
+    else
+        log "Recherche de la dernière version officielle"
+
+        UPSCAYL_RELEASE_URL="$(
+            curl -fsSL -o /dev/null -w '%{url_effective}' \
+                --proto '=https' --tlsv1.2 \
+                https://github.com/upscayl/upscayl/releases/latest
+        )"
+
+        UPSCAYL_PREFIX="https://github.com/upscayl/upscayl/releases/tag/"
+        [[ "$UPSCAYL_RELEASE_URL" == "${UPSCAYL_PREFIX}"* ]] ||
+            die "URL de publication Upscayl inattendue."
+
+        UPSCAYL_TAG="${UPSCAYL_RELEASE_URL#"$UPSCAYL_PREFIX"}"
+        [[ "$UPSCAYL_TAG" =~ ^v[0-9]+(\.[0-9]+)+$ ]] ||
+            die "Tag Upscayl inattendu : ${UPSCAYL_TAG}"
+
+        UPSCAYL_YML="$TMP_DIR/upscayl-latest-linux.yml"
+        curl -fL --retry 3 --proto '=https' --tlsv1.2 \
+            "https://github.com/upscayl/upscayl/releases/download/${UPSCAYL_TAG}/latest-linux.yml" \
+            -o "$UPSCAYL_YML"
+
+        # latest-linux.yml : les clés de premier niveau décrivent l'AppImage.
+        UPSCAYL_ASSET="$(sed -n 's/^path:[[:space:]]*//p' "$UPSCAYL_YML")"
+        UPSCAYL_SHA512="$(sed -n 's/^sha512:[[:space:]]*//p' "$UPSCAYL_YML")"
+        UPSCAYL_VERSION="${UPSCAYL_TAG#v}"
+
+        [[ "$UPSCAYL_ASSET" == "upscayl-${UPSCAYL_VERSION}-linux.AppImage" ]] ||
+            die "Nom d'AppImage Upscayl inattendu : ${UPSCAYL_ASSET:-vide}"
+
+        [[ "$UPSCAYL_SHA512" =~ ^[A-Za-z0-9+/]{86}==$ ]] ||
+            die "Condensé SHA-512 Upscayl absent ou invalide."
+
+        UPSCAYL_URL="https://github.com/upscayl/upscayl/releases/download/${UPSCAYL_TAG}/${UPSCAYL_ASSET}"
+
+        printf 'Version Upscayl : %s\n' "$UPSCAYL_VERSION"
+        printf 'URL             : %s\n' "$UPSCAYL_URL"
+        warn "Le condensé SHA-512 provient de latest-linux.yml, publié avec la release."
+        warn "Il détecte un fichier altéré, mais ne constitue pas une signature indépendante."
+
+        if confirm "Confirmez-vous le téléchargement de Upscayl ${UPSCAYL_VERSION} ?"; then
+            if apt-cache show libfuse2t64 >/dev/null 2>&1; then
+                log "Installation de libfuse2, nécessaire pour lancer l'AppImage"
+                sudo env DEBIAN_FRONTEND=noninteractive \
+                    apt-get install -y libfuse2t64
+            else
+                warn "libfuse2t64 n'est pas disponible dans les dépôts configurés."
+                warn "L'AppImage pourrait ne pas démarrer sans cette bibliothèque."
+            fi
+
+            UPSCAYL_TMP="$TMP_DIR/$UPSCAYL_ASSET"
+
+            log "Téléchargement de l'AppImage Upscayl"
+
+            curl -fL --retry 3 --proto '=https' --tlsv1.2 \
+                --connect-timeout 15 \
+                "$UPSCAYL_URL" \
+                -o "$UPSCAYL_TMP"
+
+            UPSCAYL_EXPECTED="$(
+                printf '%s' "$UPSCAYL_SHA512" |
+                    basenc --decode --base64 |
+                    od -An -tx1 |
+                    tr -d ' \n'
+            )"
+            UPSCAYL_ACTUAL="$(sha512sum "$UPSCAYL_TMP" | awk '{print $1}')"
+
+            [[ "$UPSCAYL_EXPECTED" == "$UPSCAYL_ACTUAL" ]] ||
+                die "Le condensé SHA-512 ne correspond pas à latest-linux.yml."
+
+            log "Condensé Upscayl validé"
+
+            mkdir -p -- "$UPSCAYL_DIR"
+            install -m 755 -- "$UPSCAYL_TMP" "${UPSCAYL_DEST}.partial"
+            mv -f -- "${UPSCAYL_DEST}.partial" "$UPSCAYL_DEST"
+
+            UPSCAYL_INSTALLED=1
+
+            if command -v apparmor_parser >/dev/null 2>&1 &&
+                [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true)" == "1" ]]; then
+                log "Autorisation AppArmor ciblée pour le bac à sable d'Upscayl"
+                sudo tee /etc/apparmor.d/upscayl >/dev/null <<'EOF'
+# Autorise le bac à sable Chromium d'Upscayl à créer un espace de noms
+# utilisateur. Le profil reste unconfined : aucune autre restriction.
+
+abi <abi/5.0>,
+include <tunables/global>
+
+profile upscayl @{HOME}/Applications/Upscayl/Upscayl-linux.AppImage flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+
+  include if exists <local/upscayl>
+}
+
+profile upscayl-mount /tmp/.mount_*/{AppRun,upscayl,chrome-sandbox} flags=(unconfined) {
+  userns,
+  @{exec_path} mr,
+}
+EOF
+                sudo apparmor_parser -r /etc/apparmor.d/upscayl
+            fi
+
+            log "Upscayl est prêt : ${UPSCAYL_DEST}"
+            printf 'Lancement : %s\n' "$UPSCAYL_DEST"
+        else
+            log "Téléchargement d'Upscayl annulé."
+        fi
+    fi
+else
+    log "Téléchargement d'Upscayl ignoré."
+fi
+
+# 10. Zoom et Cursor
 
 log "Zoom et Cursor ne sont pas installés automatiquement"
 
@@ -367,7 +499,7 @@ vérifie son origine, son intégrité et les mécanismes
 de signature disponibles auprès de l'éditeur.
 EOF
 
-# 10. Fin : aucune suppression automatique
+# 11. Fin : aucune suppression automatique
 
 log "Installation terminée"
 
@@ -379,9 +511,17 @@ CMake, g++, Node.js, npm, Vim et éventuellement ClamTk.
 Murmure a été traité séparément, avec contrôle du digest
 et confirmation avant installation.
 
+Upscayl est facultatif. S'il a été confirmé, l'AppImage se trouve dans :
+  ~/Applications/Upscayl/Upscayl-linux.AppImage
+
 Aucun apt autoremove automatique n'a été exécuté.
 Pour examiner les dépendances devenues inutiles :
   sudo apt autoremove
 
 Lis attentivement la liste affichée avant de confirmer.
 EOF
+
+if [[ "$UPSCAYL_INSTALLED" -eq 1 ]]; then
+    printf 'Upscayl %s installé : %s\n' \
+        "$UPSCAYL_VERSION" "$UPSCAYL_DEST"
+fi
